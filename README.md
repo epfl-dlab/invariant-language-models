@@ -32,7 +32,7 @@ Please find all useful installation information [here](https://pytorch.org/)
 
 Then, to continue the training of a language model from a [huggingface](https://huggingface.co/models) checkpoint:
 ```
-python3 run_invariant_mlm.py \
+CUDA_VISIBLE_DEVICES=0 python3 run_invariant_mlm.py \
     --model_name_or_path roberta-base \
     --validation_file data-folder/validation_file.txt \
     --do_train \
@@ -44,6 +44,8 @@ python3 run_invariant_mlm.py \
     --train_file data-folder/training-environments \
     --overwrite_cache
 ```
+If the machine on which the code is executed has several GPUs, we recommand to use the `CUDA_VISIBLE_DEVICE` command to 
+restrict to one GPU as the multiple GPUs are currently not supported by the implementation.
 
 Currently, the supported base models are:
 * `roberta`: [checkpoints](https://huggingface.co/models?sort=downloads&search=roberta)

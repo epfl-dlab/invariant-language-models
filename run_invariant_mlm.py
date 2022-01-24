@@ -36,6 +36,7 @@ from invariant_distilbert import InvariantDistilBertForMaskedLM, InvariantDistil
 import transformers
 from transformers import (
     CONFIG_MAPPING,
+    TOKENIZER_MAPPING,
     MODEL_FOR_MASKED_LM_MAPPING,
     AutoConfig,
     AutoModel,
@@ -46,6 +47,10 @@ from transformers import (
     # Trainer,
     TrainingArguments,
     set_seed,
+    DistilBertTokenizer,
+    DistilBertTokenizerFast,
+    RobertaTokenizer,
+    RobertaTokenizerFast
 )
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 
@@ -54,6 +59,14 @@ logger = logging.getLogger(__name__)
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_MASKED_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
+CONFIG_MAPPING.update({'invariant-distilbert': InvariantDistilBertConfig})
+CONFIG_MAPPING.update({'invariant-roberta': InvariantRobertaConfig})
+
+MODEL_FOR_MASKED_LM_MAPPING.update({InvariantDistilBertConfig: InvariantDistilBertForMaskedLM})
+MODEL_FOR_MASKED_LM_MAPPING.update({InvariantRobertaConfig: InvariantRobertaForMaskedLM})
+
+TOKENIZER_MAPPING.update({InvariantDistilBertConfig: (DistilBertTokenizer, DistilBertTokenizerFast)})
+TOKENIZER_MAPPING.update({InvariantRobertaConfig: (RobertaTokenizer, RobertaTokenizerFast)})
 
 @dataclass
 class ModelArguments:
@@ -105,9 +118,19 @@ class ModelArguments:
         default=False,
         metadata={"help": "Re-initialize the base language model (and thus the language modeling heads) before training"}
     )
+    ensembling: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "Whether to train the heads as an ensemble instead of following the IRM-games dynamics"}
+    )
     nb_steps_heads_saving: Optional[int] = field(
         default=0,
         metadata={"help": "Number of training steps between saving the head weights (if 0, the heads are not saved regularly)."},
+    )
+    nb_steps_model_saving: Optional[int] = field(
+        default=0,
+        metadata={
+            "help": "Number of training steps between saving the full model (if 0, the heads are not saved regularly)."},
     )
     do_lower_case: Optional[bool] = field(
         default=True,
@@ -320,12 +343,15 @@ def main():
         except:
             return False
 
-    if 'distil' in model_args.model_name_or_path:
-        inv_config = InvariantDistilBertConfig(envs=envs, **config.to_dict())
-        irm_model = InvariantDistilBertForMaskedLM(inv_config, model)
+    if 'envs' not in config.to_dict(): #if we didn't already load from pretrained an irm model
+        if 'distil' in model_args.model_name_or_path:
+            inv_config = InvariantDistilBertConfig(envs=envs, **config.to_dict())
+            irm_model = InvariantDistilBertForMaskedLM(inv_config, model)
+        else:
+            inv_config = InvariantRobertaConfig(envs=envs, **config.to_dict())
+            irm_model = InvariantRobertaForMaskedLM(inv_config, model)
     else:
-        inv_config = InvariantRobertaConfig(envs=envs, **config.to_dict())
-        irm_model = InvariantRobertaForMaskedLM(inv_config, model)
+        irm_model = model
 
     irm_model.resize_token_embeddings(len(tokenizer))
 
@@ -455,9 +481,19 @@ def main():
             checkpoint = model_args.model_name_or_path
         else:
             checkpoint = None
-        train_result = trainer.invariant_train(training_set=train_tokenized_datasets,
+
+        if model_args.ensembling:
+            logger.info("TRAINING WITH ENSEMBLE -- NOT FOLLOWING IRM-GAMES DYNAMIC")
+            train_result = trainer.ensemble_train(training_set=train_tokenized_datasets,
+                                                   nb_steps=nb_steps,
+                                                   nb_steps_heads_saving=model_args.nb_steps_heads_saving,
+                                                   nb_steps_model_saving=model_args.nb_steps_model_saving,
+                                                   resume_from_checkpoint=checkpoint)
+        else:
+            train_result = trainer.invariant_train(training_set=train_tokenized_datasets,
                                                nb_steps=nb_steps,
                                                nb_steps_heads_saving=model_args.nb_steps_heads_saving,
+                                               nb_steps_model_saving=model_args.nb_steps_model_saving,
                                                resume_from_checkpoint=checkpoint)
         trainer.save_model()  # Saves the tokenizer too for easy upload
 
